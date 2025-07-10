@@ -1,0 +1,67 @@
+Class TrackGenerator:
+    Initialize with seed, step_length, and num_points
+        Set random generator using seed
+        Set current_position to origin (0, 0)
+        Initialize direction angle and tracking variables
+        Set limits for turn angles and backtracking
+
+    Function normalize_angle(angle):
+        Return angle normalized between -180 and 180
+
+    Function get_smoothed_angle():
+        Return average of last 3 direction angles
+
+    Function would_cause_backtrack(proposed_angle):
+        If angle difference from initial direction > threshold or total turning > max:
+            Return True
+        Else:
+            Return False
+
+    Function get_safe_turn_angle(desired_angle):
+        Calculate new angle = current angle + desired_angle
+        If this causes backtracking:
+            Try reducing angle or changing direction
+            If still invalid, set angle to 0
+        Return safe angle
+
+    Function start_big_turn():
+        Randomly choose big turn angle (20–50 deg, positive or negative)
+        Adjust angle to prevent backtracking
+        Set target angle
+        Choose number of steps for smooth turn
+        Calculate angle increment per step
+        Set turning flag True and log turn start index
+
+    Function step_turn():
+        If turning steps remain:
+            Calculate next angle
+            If not backtracking:
+                Apply angle and decrement remaining steps
+            Else:
+                Stop the turn early
+        Else:
+            End turn and set target to current angle
+
+    Function generate_next_point():
+        If turning:
+            step_turn()
+        Else:
+            If steps_until_next_turn > 0:
+                Decrement step counter
+                Add small noise to angle
+                Apply only if no backtracking
+            Else:
+                Randomly choose small or big turn
+                If small turn (85% chance):
+                    Pick small turn angle (2–15 deg)
+                    Adjust safely and apply
+                    Record turn if significant
+                Else:
+                    start_big_turn()
+
+        Move forward using current direction and step_length
+        Update current_position and store it in track_points
+
+    Function generate_full_track():
+        Repeat generate_next_point() for num_points
+        Return list of track_points and turn_indices
