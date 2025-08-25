@@ -7,11 +7,12 @@ import random
 import numpy as np
 
 class TrackGenerator:
-    def __init__(self, seed, step_length=10, num_points=200):
+    def __init__(self, seed, step_length=10, num_points=200, num_stations=5):
         self.seed = seed
         self.random = random.Random(seed)
         self.step_length = step_length
         self.num_points = num_points
+        self.num_stations = num_stations
 
         # Track state
         self.current_position = (0, 0)
@@ -28,6 +29,7 @@ class TrackGenerator:
 
         self.steps_until_next_turn = self.random.randint(20, 50)
         self.turn_indices = []
+        self.station_indices = []  # Track which points are stations
 
         self.turning = False
         self.turn_steps_remaining = 0
@@ -38,6 +40,34 @@ class TrackGenerator:
         self.max_turn_angle = 60  # Reduced maximum turn angle
         self.max_cumulative_turn = 120  # Maximum total turn from initial direction
         self.backtrack_threshold = 120  # Angle threshold to consider backtracking
+
+    def calculate_station_positions(self):
+        """Calculate approximate positions for train stations with some variation."""
+        if self.num_stations <= 1:
+            return []
+        
+        # Base spacing between stations
+        base_spacing = self.num_points // (self.num_stations + 1)
+        
+        station_positions = []
+        for i in range(1, self.num_stations + 1):
+            # Calculate ideal position
+            ideal_pos = i * base_spacing
+            
+            # Add some random variation (±15% of base spacing)
+            variation_range = int(base_spacing * 0.15)
+            variation = self.random.randint(-variation_range, variation_range)
+            
+            # Make sure position stays within bounds and doesn't overlap with previous
+            actual_pos = max(10, min(self.num_points - 10, ideal_pos + variation))
+            
+            # Ensure minimum distance from previous station
+            if station_positions and actual_pos - station_positions[-1] < base_spacing // 2:
+                actual_pos = station_positions[-1] + base_spacing // 2
+            
+            station_positions.append(actual_pos)
+        
+        return station_positions
 
     def normalize_angle(self, angle):
         """Normalize angle between -180 and 180 degrees."""
@@ -185,15 +215,23 @@ class TrackGenerator:
         self.track_points.append(new_pos)
 
     def generate_full_track(self):
-        for _ in range(self.num_points):
+        # Calculate station positions before generating track
+        station_positions = self.calculate_station_positions()
+        
+        for step in range(self.num_points):
             self.generate_next_point()
-        return self.track_points, self.turn_indices
+            
+            # Check if this step should be a station
+            if step in station_positions:
+                self.station_indices.append(len(self.track_points) - 1)
+        
+        return self.track_points, self.turn_indices, self.station_indices
 
 
 class TrackApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Non-Backtracking Track Generator with Dual View")
+        self.title("Track Generator with Train Stations")
 
         # UI Controls
         controls_frame = ttk.Frame(self)
@@ -211,6 +249,11 @@ class TrackApp(tk.Tk):
         self.length_var = tk.IntVar(value=1000)
         self.length_entry = ttk.Entry(controls_frame, textvariable=self.length_var, width=7)
         self.length_entry.pack(side=tk.LEFT)
+
+        ttk.Label(controls_frame, text="Stations:").pack(side=tk.LEFT, padx=5)
+        self.stations_var = tk.IntVar(value=5)
+        self.stations_entry = ttk.Entry(controls_frame, textvariable=self.stations_var, width=7)
+        self.stations_entry.pack(side=tk.LEFT)
 
         self.generate_btn = ttk.Button(controls_frame, text="Generate Full Track", command=self.generate_full_track)
         self.generate_btn.pack(side=tk.LEFT, padx=5)
@@ -246,6 +289,8 @@ class TrackApp(tk.Tk):
         self.live_points_y = []
         self.live_turns_x = []
         self.live_turns_y = []
+        self.live_stations_x = []
+        self.live_stations_y = []
 
     def generate_random_seed(self):
         """Generate a random seed and update the seed entry."""
@@ -262,8 +307,9 @@ class TrackApp(tk.Tk):
                 pass  # Keep as string if not numeric
             
             length = self.length_var.get()
-            self.track_gen = TrackGenerator(seed, step_length=10, num_points=length)
-            points, turn_indices = self.track_gen.generate_full_track()
+            num_stations = self.stations_var.get()
+            self.track_gen = TrackGenerator(seed, step_length=10, num_points=length, num_stations=num_stations)
+            points, turn_indices, station_indices = self.track_gen.generate_full_track()
 
             xs, ys = zip(*points)
             self.ax_full.clear()
@@ -272,9 +318,16 @@ class TrackApp(tk.Tk):
             self.ax_full.plot(xs, ys, marker='o', linestyle='-', color='blue', markersize=3, label='Track Path')
 
             # Highlight turns
-            turn_x = [points[i][0] for i in turn_indices]
-            turn_y = [points[i][1] for i in turn_indices]
-            self.ax_full.scatter(turn_x, turn_y, color='red', s=40, label='Turns')
+            if turn_indices:
+                turn_x = [points[i][0] for i in turn_indices]
+                turn_y = [points[i][1] for i in turn_indices]
+                self.ax_full.scatter(turn_x, turn_y, color='orange', s=40, label='Turns')
+
+            # Highlight train stations
+            if station_indices:
+                station_x = [points[i][0] for i in station_indices]
+                station_y = [points[i][1] for i in station_indices]
+                self.ax_full.scatter(station_x, station_y, color='red', s=100, marker='s', label='Train Stations')
 
             # Set zoomed out limits with margin
             margin = 100
@@ -283,7 +336,7 @@ class TrackApp(tk.Tk):
             self.ax_full.set_xlim(min_x - margin, max_x + margin)
             self.ax_full.set_ylim(min_y - margin, max_y + margin)
 
-            self.ax_full.set_title(f"Non-Backtracking Track (Seed={seed}, Length={length})")
+            self.ax_full.set_title(f"Track with {num_stations} Stations (Seed={seed}, Length={length})")
             self.ax_full.set_aspect('equal')
             self.ax_full.grid(True)
             self.ax_full.legend()
@@ -303,12 +356,18 @@ class TrackApp(tk.Tk):
                 pass  # Keep as string if not numeric
                 
             length = self.length_var.get()
-            self.track_gen = TrackGenerator(seed, step_length=10, num_points=length)
+            num_stations = self.stations_var.get()
+            self.track_gen = TrackGenerator(seed, step_length=10, num_points=length, num_stations=num_stations)
+
+            # Pre-calculate station positions for live view
+            self.station_positions = self.track_gen.calculate_station_positions()
 
             self.live_points_x = [0]
             self.live_points_y = [0]
             self.live_turns_x = []
             self.live_turns_y = []
+            self.live_stations_x = []
+            self.live_stations_y = []
 
             self.ax_live.clear()
             self.ax_live.set_title("Zoomed-In Live Generation")
@@ -329,6 +388,11 @@ class TrackApp(tk.Tk):
         self.live_points_x.append(x)
         self.live_points_y.append(y)
 
+        # Check if this step should be a station
+        if step_count in self.station_positions:
+            self.live_stations_x.append(x)
+            self.live_stations_y.append(y)
+
         # Check if last point was a turn (using stored indices)
         if len(self.track_gen.turn_indices) > 0 and self.track_gen.turn_indices[-1] == len(self.live_points_x) - 1:
             self.live_turns_x.append(x)
@@ -339,9 +403,13 @@ class TrackApp(tk.Tk):
         # Plot path so far
         self.ax_live.plot(self.live_points_x, self.live_points_y, marker='o', linestyle='-', color='blue', markersize=5, label='Track Path')
 
-        # Plot turns in red
+        # Plot turns in orange
         if self.live_turns_x:
-            self.ax_live.scatter(self.live_turns_x, self.live_turns_y, color='red', s=60, label='Turns')
+            self.ax_live.scatter(self.live_turns_x, self.live_turns_y, color='orange', s=60, label='Turns')
+
+        # Plot stations in red squares
+        if self.live_stations_x:
+            self.ax_live.scatter(self.live_stations_x, self.live_stations_y, color='red', s=120, marker='s', label='Train Stations')
 
         # Zoom tightly around current position (with margin)
         margin = 70
@@ -349,7 +417,7 @@ class TrackApp(tk.Tk):
         self.ax_live.set_xlim(cx - margin, cx + margin)
         self.ax_live.set_ylim(cy - margin, cy + margin)
 
-        self.ax_live.set_title(f"Zoomed-In Live Generation (Step {step_count + 1})")
+        self.ax_live.set_title(f"Live Generation (Step {step_count + 1})")
         self.ax_live.set_aspect('equal')
         self.ax_live.grid(True)
         self.ax_live.legend()
